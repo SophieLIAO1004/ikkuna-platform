@@ -846,122 +846,232 @@
     ctx.restore();
   }
 
-  // 【靠近前的猶豫】v5——不再是互斥分支，改成好幾層各自獨立疊加：
-  //   基礎層：疊色光絲，RGB 數值驅動（一直都在）
-  //   運筆方向→整條靠近軸線的角度（不再固定水平，斜著靠近也可以）
-  //   轉彎弧度高→疊加「多重路徑殘影」（猶豫走過好幾條路，不需要復原/清空才會出現）
-  //   速度很慢 或 用過橡皮擦→疊加「消散質感」（兩種不同的原因都可能導致靠近途中瓦解）
-  //   用過復原或清空→疊加「重複嘗試回聲」（過去位置的淡淡殘影）
-  //   主要工具是形狀工具→在當下位置疊加對應的幾何標記
-  //   主要筆刷是粉筆/噴槍→疊加對應的顆粒/噴點質感
-  //   以上任何組合都可能同時出現，不是選一種而已
+  // ============================================================
+  // 共用技法庫：任何主題都可以呼叫這些技法，不綁定特定敘事
+  // ============================================================
+  function tech_glow(progress, params) {
+    const [r, g, b] = hexToRgbArr(params.dominantColor);
+    const n = 3 + Math.round((r / 255) * 8);
+    const curlR = 12 + (g / 255) * 26;
+    const spread = 12 + (b / 255) * 32;
+    for (let i = 0; i < n; i++) {
+      const phase = i * 1.7;
+      const x = GIF_SIZE / 2 + Math.cos(phase + progress * Math.PI * 2) * GIF_SIZE * 0.28;
+      const y = GIF_SIZE / 2 + Math.sin(phase * 1.3 + progress * Math.PI * 2 * 1.3) * GIF_SIZE * 0.22;
+      const grad = ctx.createRadialGradient(x, y, 0, x, y, spread);
+      grad.addColorStop(0, hexToRgba(params.dominantColor, 0.4));
+      grad.addColorStop(1, hexToRgba(params.dominantColor, 0));
+      ctx.fillStyle = grad;
+      ctx.beginPath(); ctx.arc(x, y, spread, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  function tech_packing(progress, params) {
+    const cx = GIF_SIZE / 2, cy = GIF_SIZE / 2;
+    const gapAngle = params.avgDir + progress * Math.PI * 0.3;
+    const gapSize = 26 + params.avgCurv * 24;
+    let seed = 17;
+    function rnd() { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; }
+    for (let i = 0; i < 38; i++) {
+      const ang = rnd() * Math.PI * 2, dist = Math.sqrt(rnd()) * GIF_SIZE * 0.42;
+      const x = cx + Math.cos(ang) * dist, y = cy + Math.sin(ang) * dist;
+      let d = Math.abs(((ang - gapAngle + Math.PI) % (Math.PI * 2)) - Math.PI);
+      if (d < 0.3 && dist < gapSize + 36) continue;
+      ctx.fillStyle = hexToRgba(params.dominantColor, 0.22 + rnd() * 0.28);
+      ctx.beginPath(); ctx.arc(x, y, 4 + rnd() * 9, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  function tech_flock(progress, params) {
+    const cx = GIF_SIZE / 2, cy = GIF_SIZE / 2;
+    const baseR = 50 + params.avgCurv * 20;
+    for (let k = 6; k >= 0; k--) {
+      const tp = progress - k * 0.02;
+      const r2 = baseR + Math.sin(tp * Math.PI * 2 * (1 + params.avgSpeed * 3)) * (15 + params.avgCurv * 25);
+      const a = tp * Math.PI * 2 * (1.5 + params.avgSpeed * 2) + params.avgDir;
+      const x = cx + Math.cos(a) * r2, y = cy + Math.sin(a) * r2 * 0.7;
+      ctx.fillStyle = hexToRgba(params.dominantColor, k === 0 ? 0.7 : 0.06 * (1 - k / 7));
+      ctx.beginPath(); ctx.arc(x, y, k === 0 ? 6 + params.avgSpeed * 4 : 4, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  function tech_branch(progress, params) {
+    const growT = 0.35 + Math.sin(progress * Math.PI * 2 * (1 + params.avgSpeed * 2)) * 0.2;
+    const branches = Math.min(5, Math.max(2, Math.round(params.strokeCount / 2)));
+    function db(x, y, angle, len, depth) {
+      if (depth <= 0 || len < 4) return;
+      const x2 = x + Math.cos(angle) * len, y2 = y + Math.sin(angle) * len;
+      ctx.strokeStyle = hexToRgba(params.dominantColor, 0.18 + depth * 0.09);
+      ctx.lineWidth = depth * 0.8;
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x2, y2); ctx.stroke();
+      db(x2, y2, angle - 0.4, len * 0.65, depth - 1);
+      db(x2, y2, angle + 0.4, len * 0.65, depth - 1);
+    }
+    for (let i = 0; i < branches; i++) {
+      const spread = (i - (branches - 1) / 2) * 0.15;
+      db(GIF_SIZE * 0.5, GIF_SIZE * 0.5, params.avgDir + spread, (GIF_SIZE * 0.28) * growT, 4);
+    }
+  }
+
+  function tech_gridspin(progress, params) {
+    const [r, g, b] = hexToRgbArr(params.dominantColor);
+    const cols = 4 + Math.round((r / 255) * 4), rows = cols;
+    const cw = GIF_SIZE / cols, ch = GIF_SIZE / rows;
+    const radius = 3 + (g / 255) * 6, phaseVar = 1 + (b / 255) * 3;
+    const speed = 0.5 + params.avgSpeed * 3;
+    for (let cy2 = 0; cy2 < rows; cy2++) {
+      for (let cx2 = 0; cx2 < cols; cx2++) {
+        const ccx = cw * (cx2 + 0.5), ccy = ch * (cy2 + 0.5);
+        const phase = (cx2 * 1.3 + cy2 * 1.7) * phaseVar;
+        const ang = progress * Math.PI * 2 * speed + phase;
+        const rad = radius * (0.7 + params.avgCurv);
+        ctx.fillStyle = hexToRgba(params.dominantColor, 0.28);
+        ctx.beginPath(); ctx.arc(ccx + Math.cos(ang) * rad, ccy + Math.sin(ang) * rad, 2.2, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+  }
+
+  function tech_bands(progress, params) {
+    const colors = params.colors;
+    const bands = Math.max(3, Math.min(8, params.strokeCount + 2));
+    const outward = Math.cos(params.avgDir);
+    for (let i = 0; i < bands; i++) {
+      const y = GIF_SIZE * (i / bands) + Math.sin(progress * Math.PI * 2 * (1 + params.avgCurv) + i) * 6;
+      let recede = ((progress * (0.3 + params.avgSpeed * 0.5)) % 1) * GIF_SIZE;
+      if (outward < 0) recede = GIF_SIZE - recede;
+      const w = outward >= 0 ? GIF_SIZE - recede : recede;
+      const x = outward >= 0 ? 0 : GIF_SIZE - w;
+      ctx.fillStyle = hexToRgba(colors[i % colors.length], 0.28);
+      ctx.fillRect(x, y, w, GIF_SIZE / bands * 0.75);
+    }
+  }
+
+  function tech_pathshapes(progress, params) {
+    const n = 8 + Math.round(params.avgSpeed * 10);
+    let seed = 71;
+    function rnd() { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; }
+    for (let i = 0; i < n; i++) {
+      const tpos = (i / n + progress * 0.3) % 1;
+      const wob = Math.sin(tpos * Math.PI * 6 + params.avgDir) * 40 * params.avgCurv;
+      const x = tpos * GIF_SIZE, y = GIF_SIZE / 2 + wob + Math.sin(tpos * Math.PI * 2) * GIF_SIZE * 0.15;
+      const s = 6 + rnd() * 10;
+      const type = Math.floor(rnd() * 3);
+      ctx.save(); ctx.translate(x, y); ctx.rotate(rnd() * Math.PI * 2);
+      ctx.fillStyle = hexToRgba(params.dominantColor, 0.5);
+      if (type === 0) ctx.fillRect(-s / 2, -s / 2, s, s);
+      else if (type === 1) { ctx.beginPath(); ctx.arc(0, 0, s / 2, 0, Math.PI * 2); ctx.fill(); }
+      else { ctx.beginPath(); ctx.moveTo(0, -s / 2); ctx.lineTo(s / 2, s / 2); ctx.lineTo(-s / 2, s / 2); ctx.closePath(); ctx.fill(); }
+      ctx.restore();
+    }
+  }
+
+  function tech_diffraction(progress, params) {
+    const sources = [{ x: GIF_SIZE * 0.3, y: GIF_SIZE * 0.5 }, { x: GIF_SIZE * 0.7, y: GIF_SIZE * 0.5 }];
+    const step = 12;
+    for (let x = 0; x < GIF_SIZE; x += step) {
+      for (let y = 0; y < GIF_SIZE; y += step) {
+        let v = 0;
+        sources.forEach(s => {
+          const d = Math.hypot(x - s.x, y - s.y);
+          v += Math.cos(d * 0.15 - progress * Math.PI * 2 * (1 + params.avgSpeed * 2)) / (1 + d * 0.01);
+        });
+        const bright = Math.max(0, Math.min(1, (v + 1) / 2));
+        if (bright > 0.55) {
+          ctx.fillStyle = hexToRgba(params.dominantColor, bright * 0.28);
+          ctx.fillRect(x, y, step + 1, step + 1);
+        }
+      }
+    }
+  }
+
+  function tech_scribble(progress, params) {
+    let seed = 203;
+    function rnd() { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; }
+    let x = GIF_SIZE * 0.3, y = GIF_SIZE * 0.5;
+    ctx.strokeStyle = hexToRgba(params.dominantColor, 0.45);
+    ctx.lineWidth = 1.3;
+    const steps = Math.round(20 + params.avgCurv * 30);
+    const revealTo = (progress * 1.3) % 1;
+    ctx.beginPath(); ctx.moveTo(x, y);
+    for (let i = 0; i < steps; i++) {
+      const ang = rnd() * Math.PI * 2, len = 8 + rnd() * 14;
+      x += Math.cos(ang) * len; y += Math.sin(ang) * len;
+      x = Math.max(10, Math.min(GIF_SIZE - 10, x)); y = Math.max(10, Math.min(GIF_SIZE - 10, y));
+      if (i / steps < revealTo) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+    }
+    ctx.stroke();
+  }
+
+  function tech_chart(progress, params) {
+    const colW = 8, cols = Math.floor(GIF_SIZE / colW);
+    let seed = 305;
+    function rnd() { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; }
+    for (let i = 0; i < cols; i++) {
+      const h = (0.3 + rnd() * 0.6) * GIF_SIZE * (0.5 + params.avgSpeed * 0.5) * Math.abs(Math.sin(progress * Math.PI * 2 + i * 0.3));
+      ctx.fillStyle = hexToRgba(params.dominantColor, 0.22 + rnd() * 0.28);
+      ctx.fillRect(i * colW, GIF_SIZE - h, colW - 1, h);
+    }
+  }
+
+  const TECH_FUNCS = {
+    glow: tech_glow, packing: tech_packing, flock: tech_flock, branch: tech_branch,
+    gridspin: tech_gridspin, bands: tech_bands, pathshapes: tech_pathshapes,
+    diffraction: tech_diffraction, scribble: tech_scribble, chart: tech_chart
+  };
+
+  // 分數式選擇：每種技法用連續數值算分數（不是門檻分類），取分數最高的前幾名疊加。
+  // 因為分數是用實際的 RGB 數值、速度數字去算的，即使兩人用同一種筆刷，
+  // 只要顏色或速度的精確數值不同，排名結果通常也會不同。
+  function techniqueScores(params) {
+    const [r, g, b] = hexToRgbArr(params.dominantColor);
+    const rn = r / 255, gn = g / 255, bn = b / 255;
+    const dx = Math.abs(Math.cos(params.avgDir));
+    return {
+      glow: 0.3 + params.avgCurv * 0.3 + bn * 0.3,
+      packing: 0.2 + (params.dominantBrush === 'chalk' || params.dominantBrush === 'spray' ? 0.4 : 0) + gn * 0.3,
+      flock: 0.2 + dx * 0.3 + params.avgSpeed * 0.3,
+      branch: 0.15 + Math.min(1, params.strokeCount / 10) * 0.5,
+      gridspin: 0.15 + (1 - params.avgCurv) * 0.3 + rn * 0.3,
+      bands: 0.15 + dx * 0.3 + (1 - params.avgSpeed) * 0.2,
+      pathshapes: 0.15 + params.avgSpeed * 0.4 + (params.dominantTool !== 'pen' ? 0.25 : 0),
+      diffraction: 0.15 + (params.hasClear ? 0.3 : 0) + (1 - params.avgSpeed) * 0.2,
+      scribble: 0.15 + params.avgCurv * 0.5,
+      chart: 0.15 + params.avgSpeed * 0.4 + rn * 0.2
+    };
+  }
+  function pickTechniques(params, n) {
+    const scores = techniqueScores(params);
+    return Object.entries(scores).sort((a, b) => b[1] - a[1]).slice(0, n).map(e => e[0]);
+  }
+
+  // 【靠近前的猶豫】v7——從技法庫取分數最高的前三名疊加，
+  // 猶豫靠近的核心敘事（一個點沿方向軸線來回靠近固定目標）疊在技法之上維持題目可讀性
   function theme_hesitate(progress, params) {
     const dark = isColorDark(params.bgColor);
     ctx.fillStyle = dark ? mixColor(params.bgColor, '#08080A', 0.6) : mixColor(params.bgColor, '#FAF8F3', 0.5);
     ctx.fillRect(0, 0, GIF_SIZE, GIF_SIZE);
     if (dark) { ctx.save(); ctx.globalCompositeOperation = 'lighter'; }
 
+    const picks = pickTechniques(params, 3);
+    ctx.globalAlpha = 1;
+    TECH_FUNCS[picks[0]](progress, params);
+    ctx.globalAlpha = 0.7;
+    TECH_FUNCS[picks[1]](progress, params);
+    ctx.globalAlpha = 0.5;
+    TECH_FUNCS[picks[2]](progress, params);
+    ctx.globalAlpha = 1;
+
     const cx = GIF_SIZE / 2, cy = GIF_SIZE / 2;
-    const approachLen = GIF_SIZE * 0.5;
-    const axisAngle = params.avgDir; // 運筆方向決定整條靠近軸線的角度
-    const ax = Math.cos(axisAngle), ay = Math.sin(axisAngle);
-    const perpX = -ay, perpY = ax;
-    const start = { x: cx - ax * approachLen / 2, y: cy - ay * approachLen / 2 };
-    const target = { x: cx + ax * approachLen / 2, y: cy + ay * approachLen / 2 };
-
-    const hesitationAmp = 0.1 + params.avgCurv * 0.3;
-    const hesitationFreq = 1 + params.avgSpeed * 4;
-    function approachAt(tt) {
-      const base = 0.2 + tt * 0.35;
-      const osc = Math.sin(tt * Math.PI * 2 * hesitationFreq) * hesitationAmp;
-      return Math.max(0.05, Math.min(0.85, base + osc));
-    }
-    const t = approachAt(progress);
+    const ax = Math.cos(params.avgDir), ay = Math.sin(params.avgDir);
+    const len = GIF_SIZE * 0.5;
+    const start = { x: cx - ax * len / 2, y: cy - ay * len / 2 }, target = { x: cx + ax * len / 2, y: cy + ay * len / 2 };
+    const freq = 1 + params.avgSpeed * 4, amp = 0.1 + params.avgCurv * 0.3;
+    const t = Math.max(0.05, Math.min(0.85, 0.2 + progress * 0.35 + Math.sin(progress * Math.PI * 2 * freq) * amp));
     const px = start.x + (target.x - start.x) * t, py = start.y + (target.y - start.y) * t;
-
-    // 固定不動的一方
-    ctx.fillStyle = hexToRgba(params.dominantColor, 0.25);
-    ctx.beginPath(); ctx.arc(target.x, target.y, 22, 0, Math.PI * 2); ctx.fill();
-
-    // 基礎層：疊色光絲，R/G/B 數值分別驅動數量／擺動幅度／暈開範圍
-    const [r, g, b] = hexToRgbArr(params.dominantColor);
-    const strands = 3 + Math.round((r / 255) * 7);
-    const curlAmp = 6 + (g / 255) * 24;
-    const glowSpread = 12 + (b / 255) * 30;
-    for (let s = 0; s < strands; s++) {
-      const phase = s * 1.7;
-      const curl = Math.sin(progress * Math.PI * 2 * hesitationFreq + phase) * curlAmp;
-      const sx = px + perpX * curl, sy = py + perpY * curl;
-      const grad = ctx.createRadialGradient(sx, sy, 0, sx, sy, glowSpread);
-      grad.addColorStop(0, hexToRgba(params.dominantColor, 0.45));
-      grad.addColorStop(1, hexToRgba(params.dominantColor, 0));
-      ctx.fillStyle = grad;
-      ctx.beginPath(); ctx.arc(sx, sy, glowSpread, 0, Math.PI * 2); ctx.fill();
-    }
-
-    // 疊加層：轉彎弧度越高，多重路徑殘影越多條
-    if (params.avgCurv > 0.2) {
-      const extraPaths = Math.round(params.avgCurv * 6);
-      for (let p = 1; p <= extraPaths; p++) {
-        const off = p * 13;
-        const tp = approachAt((progress + p * 0.07) % 1);
-        const ppx = start.x + (target.x - start.x) * tp + perpX * off;
-        const ppy = start.y + (target.y - start.y) * tp + perpY * off;
-        ctx.fillStyle = hexToRgba(params.dominantColor, 0.12);
-        ctx.beginPath(); ctx.arc(ppx, ppy, 5, 0, Math.PI * 2); ctx.fill();
-      }
-    }
-
-    // 疊加層：用過復原或清空→重複嘗試的淡淡回聲
-    if (params.hasUndo || params.hasClear) {
-      for (let k = 1; k <= 3; k++) {
-        const tp = Math.max(0, progress - k * 0.08);
-        const tt = approachAt(tp);
-        const ex = start.x + (target.x - start.x) * tt, ey = start.y + (target.y - start.y) * tt;
-        ctx.fillStyle = hexToRgba(params.dominantColor, 0.1 * (1 - k / 4));
-        ctx.beginPath(); ctx.arc(ex, ey, 10, 0, Math.PI * 2); ctx.fill();
-      }
-    }
-
-    // 疊加層：速度很慢 或 用過橡皮擦→消散質感（兩種不同原因都會觸發同一種效果）
-    if (params.avgSpeed < 0.25 || params.hasEraser) {
-      const n = 10;
-      for (let i = 0; i < n; i++) {
-        const ang = (i / n) * Math.PI * 2 + progress * Math.PI * 2;
-        const spread = 8 + progress * 20;
-        ctx.fillStyle = hexToRgba(params.dominantColor, 0.3);
-        ctx.beginPath(); ctx.arc(px + Math.cos(ang) * spread, py + Math.sin(ang) * spread * 0.6, 1.8, 0, Math.PI * 2); ctx.fill();
-      }
-    }
-
-    // 疊加層：主要工具是形狀工具→在當下位置疊加對應的幾何標記
-    if (params.dominantTool !== 'pen') {
-      ctx.save();
-      ctx.translate(px, py); ctx.rotate(axisAngle);
-      const s = 10 + params.avgSpeed * 6;
-      ctx.fillStyle = hexToRgba(params.dominantColor, 0.8);
-      if (params.dominantTool === 'rect') ctx.fillRect(-s / 2, -s / 2, s, s);
-      else if (params.dominantTool === 'line') {
-        ctx.strokeStyle = hexToRgba(params.dominantColor, 0.8); ctx.lineWidth = 3;
-        ctx.beginPath(); ctx.moveTo(-s, 0); ctx.lineTo(s, 0); ctx.stroke();
-      } else { ctx.beginPath(); ctx.arc(0, 0, s / 2, 0, Math.PI * 2); ctx.fill(); }
-      ctx.restore();
-    }
-
-    // 疊加層：主要筆刷質感（粉筆/噴槍才額外疊加顆粒感，水彩/麥克筆/滑順已反映在基礎層裡）
-    if (params.dominantBrush === 'chalk') {
-      for (let i = 0; i < 12; i++) {
-        const rx = px + (Math.random() - 0.5) * 20, ry = py + (Math.random() - 0.5) * 20;
-        ctx.fillStyle = hexToRgba(params.dominantColor, 0.25);
-        ctx.beginPath(); ctx.arc(rx, ry, 1, 0, Math.PI * 2); ctx.fill();
-      }
-    } else if (params.dominantBrush === 'spray') {
-      for (let i = 0; i < 10; i++) {
-        const ang = Math.random() * Math.PI * 2, rad = Math.random() * 14;
-        ctx.fillStyle = hexToRgba(params.dominantColor, 0.35);
-        ctx.beginPath(); ctx.arc(px + Math.cos(ang) * rad, py + Math.sin(ang) * rad, 1.4, 0, Math.PI * 2); ctx.fill();
-      }
-    }
+    ctx.fillStyle = hexToRgba(params.dominantColor, 0.3);
+    ctx.beginPath(); ctx.arc(target.x, target.y, 16, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = hexToRgba(params.dominantColor, 0.9);
+    ctx.beginPath(); ctx.arc(px, py, 5 + params.avgSpeed * 4, 0, Math.PI * 2); ctx.fill();
 
     if (dark) ctx.restore();
   }
