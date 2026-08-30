@@ -838,7 +838,59 @@
     ctx.restore();
   }
 
-  const THEME_RENDERERS = { 0: theme_wound, 3: theme_float, 6: theme_tide, 7: theme_crack, 13: theme_suspended };
+  // 【靠近前的猶豫】
+  // 轉彎弧度→來回猶豫的幅度大小；速度→猶豫震盪得多急促；
+  // 有沒有用過橡皮擦→最終是整個退開（用過）還是雖猶豫仍緩緩靠近（沒用過）；
+  // 筆畫數→猶豫軌跡殘影的數量（猶豫次數被看見的程度）；筆刷質感→靠近對象的質地
+  function theme_hesitate(progress, params) {
+    ctx.fillStyle = mixColor(params.bgColor, '#F5F1EA', 0.6); ctx.fillRect(0, 0, GIF_SIZE, GIF_SIZE);
+    const cy = GIF_SIZE / 2;
+    const targetX = GIF_SIZE * 0.72, startX = GIF_SIZE * 0.15;
+
+    // 固定不動的一方：被靠近的對象
+    ctx.fillStyle = hexToRgba(params.dominantColor, 0.28);
+    ctx.beginPath(); ctx.arc(targetX, cy, 26, 0, Math.PI * 2); ctx.fill();
+
+    const hesitationAmp = 0.15 + params.avgCurv * 0.35;
+    const hesitationFreq = 1 + params.avgSpeed * 4;
+
+    function approachAt(t) {
+      const base = params.hasEraser
+        ? (Math.sin(t * Math.PI * 2) * 0.5 + 0.5) * 0.55
+        : 0.25 + t * 0.3;
+      const osc = Math.sin(t * Math.PI * 2 * hesitationFreq) * hesitationAmp;
+      return Math.max(0.08, Math.min(0.85, base + osc));
+    }
+
+    // 猶豫軌跡殘影：筆畫數越多，越看得出反覆猶豫的痕跡
+    const trails = Math.min(4, params.strokeCount);
+    for (let k = trails; k >= 1; k--) {
+      const tp = Math.max(0, progress - k * 0.04);
+      const tt = approachAt(tp);
+      const tx = startX + (targetX - startX) * tt;
+      ctx.fillStyle = hexToRgba(params.dominantColor, 0.14 * (1 - k / (trails + 1)));
+      ctx.beginPath(); ctx.arc(tx, cy, 14, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // 當下這一刻猶豫的位置
+    const t = approachAt(progress);
+    const x = startX + (targetX - startX) * t;
+    const y = cy + Math.sin(progress * Math.PI * 2 * hesitationFreq * 0.5) * params.avgCurv * 10;
+    const size = 16 + params.avgSpeed * 10;
+
+    if (params.dominantBrush === 'watercolor') {
+      const grad = ctx.createRadialGradient(x, y, 0, x, y, size * 1.4);
+      grad.addColorStop(0, hexToRgba(params.dominantColor, 0.6));
+      grad.addColorStop(1, hexToRgba(params.dominantColor, 0));
+      ctx.fillStyle = grad;
+      ctx.beginPath(); ctx.arc(x, y, size * 1.4, 0, Math.PI * 2); ctx.fill();
+    } else {
+      ctx.fillStyle = hexToRgba(params.dominantColor, params.dominantBrush === 'marker' ? 0.9 : 0.72);
+      ctx.beginPath(); ctx.arc(x, y, size, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  const THEME_RENDERERS = { 0: theme_wound, 2: theme_hesitate, 3: theme_float, 6: theme_tide, 7: theme_crack, 13: theme_suspended };
 
   function renderThemeFrame(promptIndex, progress, params, scaledStrokes) {
     const custom = THEME_RENDERERS[promptIndex];
