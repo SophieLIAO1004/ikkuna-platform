@@ -842,84 +842,97 @@
     ctx.restore();
   }
 
-  // 【靠近前的猶豫】v2
-  // 筆刷種類→整個「猶豫中前進」的視覺結構長怎樣（不只是顏色深淺）：
-  //   噴槍=時聚時散的粒子群；粉筆=粗糙顆粒的一團；水彩=柔軟暈開的光斑；
-  //   麥克筆=扁平帶角度的色塊；滑順=乾淨的圓
-  // 主要使用的工具→被靠近的固定對象是什麼形狀（圓/方/線）
-  // 背景明暗→深色背景改用發光疊加畫法，淺色背景維持平塗
-  // 轉彎弧度→猶豫幅度；速度→猶豫急促程度；有沒有用過橡皮擦→最終整個退開或仍緩緩靠近
+  // 【靠近前的猶豫】v3
+  // 改用「相加疊色」技法（多條半透明光帶疊加，重疊越多越亮），
+  // 顏色的 R/G/B 數值直接是公式參數，不是分類判斷深淺而已：
+  //   R 值→同時嘗試靠近的光絲數量（越紅、越多條、越焦躁）
+  //   G 值→光絲擺動的彎曲幅度（越綠、擺得越不安分）
+  //   B 值→光暈擴散的範圍（越藍、暈得越開）
+  // 轉彎弧度、速度、有沒有用過橡皮擦→仍然決定猶豫的動態節奏
   function theme_hesitate(progress, params) {
+    const [r, g, b] = hexToRgbArr(params.dominantColor);
+    const rn = r / 255, gn = g / 255, bn = b / 255;
     const dark = isColorDark(params.bgColor);
-    ctx.fillStyle = dark ? mixColor(params.bgColor, '#0B0B0D', 0.5) : mixColor(params.bgColor, '#F5F1EA', 0.6);
+    ctx.fillStyle = dark ? mixColor(params.bgColor, '#08080A', 0.6) : mixColor(params.bgColor, '#FAF8F3', 0.5);
     ctx.fillRect(0, 0, GIF_SIZE, GIF_SIZE);
 
     const cy = GIF_SIZE / 2;
-    const targetX = GIF_SIZE * 0.72, startX = GIF_SIZE * 0.15;
-    const hesitationAmp = 0.15 + params.avgCurv * 0.35;
+    const targetX = GIF_SIZE * 0.7, startX = GIF_SIZE * 0.2;
+    const hesitationAmp = 0.12 + params.avgCurv * 0.35;
     const hesitationFreq = 1 + params.avgSpeed * 4;
-
     function approachAt(t) {
-      const base = params.hasEraser ? (Math.sin(t * Math.PI * 2) * 0.5 + 0.5) * 0.55 : 0.25 + t * 0.3;
+      const base = params.hasEraser ? (Math.sin(t * Math.PI * 2) * 0.5 + 0.5) * 0.5 : 0.2 + t * 0.35;
       const osc = Math.sin(t * Math.PI * 2 * hesitationFreq) * hesitationAmp;
-      return Math.max(0.08, Math.min(0.85, base + osc));
+      return Math.max(0.05, Math.min(0.85, base + osc));
     }
     const t = approachAt(progress);
-    const x = startX + (targetX - startX) * t;
-    const y = cy + Math.sin(progress * Math.PI * 2 * hesitationFreq * 0.5) * params.avgCurv * 10;
-    const size = 16 + params.avgSpeed * 10;
+    const headX = startX + (targetX - startX) * t;
 
-    if (dark) { ctx.save(); ctx.globalCompositeOperation = 'lighter'; }
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
 
-    // 被靠近的固定對象：形狀依主要使用的工具決定
-    ctx.fillStyle = hexToRgba(params.dominantColor, 0.28);
-    if (params.dominantTool === 'rect') {
-      ctx.fillRect(targetX - 24, cy - 24, 48, 48);
-    } else if (params.dominantTool === 'line') {
-      ctx.strokeStyle = hexToRgba(params.dominantColor, 0.4);
-      ctx.lineWidth = 4;
-      ctx.beginPath(); ctx.moveTo(targetX, cy - 26); ctx.lineTo(targetX, cy + 26); ctx.stroke();
-    } else {
-      ctx.beginPath(); ctx.arc(targetX, cy, 26, 0, Math.PI * 2); ctx.fill();
-    }
+    const strands = 3 + Math.round(rn * 9);   // 紅色分量→光絲數量
+    const curlAmp = 6 + gn * 30;               // 綠色分量→擺動弧度
+    const glowSpread = 14 + bn * 40;           // 藍色分量→光暈擴散範圍
 
-    // 猶豫中前進的一方：結構依主要使用的筆刷決定
-    if (params.dominantBrush === 'spray') {
-      const n = 14;
-      const spread = size * 0.9 * (1.15 - t);
-      for (let i = 0; i < n; i++) {
-        const ang = (i / n) * Math.PI * 2 + progress * Math.PI * 2;
-        ctx.fillStyle = hexToRgba(params.dominantColor, 0.55);
-        ctx.beginPath(); ctx.arc(x + Math.cos(ang) * spread, y + Math.sin(ang) * spread, 2.4, 0, Math.PI * 2); ctx.fill();
-      }
-    } else if (params.dominantBrush === 'chalk') {
-      for (let i = 0; i < 26; i++) {
-        const rx = x + (Math.random() - 0.5) * size * 1.5;
-        const ry = y + (Math.random() - 0.5) * size * 1.5;
-        ctx.fillStyle = hexToRgba(params.dominantColor, 0.32);
-        ctx.beginPath(); ctx.arc(rx, ry, 1.3, 0, Math.PI * 2); ctx.fill();
-      }
-    } else if (params.dominantBrush === 'watercolor') {
-      const grad = ctx.createRadialGradient(x, y, 0, x, y, size * 1.6);
-      grad.addColorStop(0, hexToRgba(params.dominantColor, 0.55));
+    for (let s = 0; s < strands; s++) {
+      const phase = s * 1.7;
+      const sy = cy + Math.sin(phase) * 50;
+      const curl = Math.sin(progress * Math.PI * 2 * hesitationFreq + phase) * curlAmp;
+      const sx = headX + Math.cos(phase * 1.3) * 10;
+      const grad = ctx.createRadialGradient(sx, sy + curl, 0, sx, sy + curl, glowSpread);
+      grad.addColorStop(0, hexToRgba(params.dominantColor, 0.5));
       grad.addColorStop(1, hexToRgba(params.dominantColor, 0));
       ctx.fillStyle = grad;
-      ctx.beginPath(); ctx.arc(x, y, size * 1.6, 0, Math.PI * 2); ctx.fill();
-    } else if (params.dominantBrush === 'marker') {
-      ctx.save();
-      ctx.translate(x, y); ctx.rotate(params.avgDir);
-      ctx.fillStyle = hexToRgba(params.dominantColor, 0.85);
-      ctx.fillRect(-size, -size * 0.38, size * 2, size * 0.76);
-      ctx.restore();
-    } else {
-      ctx.fillStyle = hexToRgba(params.dominantColor, 0.75);
-      ctx.beginPath(); ctx.arc(x, y, size, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(sx, sy + curl, glowSpread, 0, Math.PI * 2); ctx.fill();
     }
 
-    if (dark) ctx.restore();
+    const targetGrad = ctx.createRadialGradient(targetX, cy, 0, targetX, cy, 30);
+    targetGrad.addColorStop(0, hexToRgba(params.dominantColor, 0.4));
+    targetGrad.addColorStop(1, hexToRgba(params.dominantColor, 0));
+    ctx.fillStyle = targetGrad;
+    ctx.beginPath(); ctx.arc(targetX, cy, 30, 0, Math.PI * 2); ctx.fill();
+
+    ctx.restore();
   }
 
-  const THEME_RENDERERS = { 0: theme_wound, 2: theme_hesitate, 3: theme_float, 6: theme_tide, 7: theme_crack, 13: theme_suspended };
+  // 【擁擠中的安靜】
+  // 技法：網格自轉點錯視（參考 Moving Dot Illusion）——一整片點各自忙碌地繞著
+  // 自己的局部圓心轉，只有其中一個安靜不太動，代表人群中安靜的那個自己。
+  // R 值→網格密度（人群擁擠程度）；G 值→每個點自轉半徑；B 值→相位差異程度（越亂越不同步）
+  // 速度→人群轉動的忙碌程度；轉彎弧度→人群動作的混亂程度
+  function theme_crowd_quiet(progress, params) {
+    const [r, g, b] = hexToRgbArr(params.dominantColor);
+    const rn = r / 255, gn = g / 255, bn = b / 255;
+    ctx.fillStyle = mixColor(params.bgColor, '#F3F1EC', 0.6);
+    ctx.fillRect(0, 0, GIF_SIZE, GIF_SIZE);
+
+    const cols = 5 + Math.round(rn * 4);
+    const rows = cols;
+    const cellW = GIF_SIZE / cols, cellH = GIF_SIZE / rows;
+    const radius = 4 + gn * 7;
+    const phaseVar = 1 + bn * 4;
+    const speed = 0.5 + params.avgSpeed * 3;
+    const quietCol = Math.floor(cols / 2), quietRow = Math.floor(rows / 2);
+
+    for (let cy = 0; cy < rows; cy++) {
+      for (let cx = 0; cx < cols; cx++) {
+        const centerX = cellW * (cx + 0.5), centerY = cellH * (cy + 0.5);
+        const isQuiet = (cx === quietCol && cy === quietRow);
+        const phase = (cx * 1.3 + cy * 1.7) * phaseVar;
+        const localSpeed = isQuiet ? 0.15 : speed;
+        const localRadius = isQuiet ? radius * 0.35 : radius * (0.7 + params.avgCurv);
+        const angle = progress * Math.PI * 2 * localSpeed + phase;
+        const dx = Math.cos(angle) * localRadius, dy = Math.sin(angle) * localRadius;
+        ctx.fillStyle = isQuiet ? hexToRgba(params.dominantColor, 0.95) : hexToRgba(params.dominantColor, 0.32);
+        ctx.beginPath();
+        ctx.arc(centerX + dx, centerY + dy, isQuiet ? 5 : 2.6, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
+  const THEME_RENDERERS = { 0: theme_wound, 1: theme_crowd_quiet, 2: theme_hesitate, 3: theme_float, 6: theme_tide, 7: theme_crack, 13: theme_suspended };
 
   function renderThemeFrame(promptIndex, progress, params, scaledStrokes) {
     const custom = THEME_RENDERERS[promptIndex];
