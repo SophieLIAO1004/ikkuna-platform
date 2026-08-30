@@ -573,8 +573,24 @@
       avgSpeed: n > 0 ? speedSum / n : 0.3,
       avgCurv: n > 0 ? curvSum / n : 0,
       strokeCount: strokesArr.length,
-      bgColor: bgColor || '#FFFFFF'
+      bgColor: bgColor || '#FFFFFF',
+      toolCounts: toolCounts,
+      brushCounts: brushCounts,
+      hasEraser: !!toolCounts['eraser']
     };
+  }
+
+  function hexToRgbArr(hex) {
+    let h = hex.replace('#', '');
+    if (h.length === 3) h = h.split('').map(c => c + c).join('');
+    return [parseInt(h.substring(0, 2), 16), parseInt(h.substring(2, 4), 16), parseInt(h.substring(4, 6), 16)];
+  }
+  function mixColor(hexA, hexB, t) {
+    const pa = hexToRgbArr(hexA), pb = hexToRgbArr(hexB);
+    const r = Math.round(pa[0] * (1 - t) + pb[0] * t);
+    const g = Math.round(pa[1] * (1 - t) + pb[1] * t);
+    const b = Math.round(pa[2] * (1 - t) + pb[2] * t);
+    return 'rgb(' + r + ',' + g + ',' + b + ')';
   }
 
   // ---- 把原始座標等比例縮放置中，供需要用到實際筆畫幾何形狀的演算法使用 ----
@@ -693,67 +709,133 @@
   // ============ 主題專屬演算法（示範，先做 5 個，其餘沿用備援流派） ============
   // 索引對應 PROMPTS 陣列：0尚未癒合的地方 3漂浮 6退潮 7裂縫裡的光 13停在半空中
 
+  // ============ 主題專屬演算法 v2：每個參數在這個主題下都有具體的含義 ============
+
+  // 【尚未癒合的地方】
+  // 轉彎弧度→傷口破碎/整齊的程度；速度→脈動快慢（焦慮或平靜）；
+  // 運筆方向→傷口的角度；有沒有用過橡皮擦→這一輪循環裡傷口是否逐漸癒合；
+  // 筆畫數→傷口的數量（最多3條）
   function theme_wound(progress, params) {
     ctx.fillStyle = params.bgColor; ctx.fillRect(0, 0, GIF_SIZE, GIF_SIZE);
-    const gap = 5 + Math.sin(progress * Math.PI * 2) * 3 + params.avgCurv * 10;
-    ctx.strokeStyle = hexToRgba(params.dominantColor, 0.85);
-    ctx.lineWidth = 2 + params.strokeCount * 0.3;
-    ctx.beginPath(); ctx.moveTo(GIF_SIZE * 0.2, GIF_SIZE * 0.5 - gap); ctx.lineTo(GIF_SIZE * 0.8, GIF_SIZE * 0.5 - gap); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(GIF_SIZE * 0.2, GIF_SIZE * 0.5 + gap); ctx.lineTo(GIF_SIZE * 0.8, GIF_SIZE * 0.5 + gap); ctx.stroke();
+    const cx = GIF_SIZE / 2, cy = GIF_SIZE / 2;
+    const healProgress = params.hasEraser ? progress : 0; // 用過橡皮擦＝有嘗試修復，這輪會漸漸癒合
+    const baseGap = Math.max(2, 10 - params.avgCurv * 8) * (1 - healProgress * 0.7);
+    const pulse = Math.sin(progress * Math.PI * 2 * (0.5 + params.avgSpeed)) * (2 + params.avgCurv * 6);
+    const gap = baseGap + pulse;
+    const len = GIF_SIZE * 0.55;
+    const wounds = Math.max(1, Math.min(3, params.strokeCount));
+    for (let w = 0; w < wounds; w++) {
+      ctx.save();
+      ctx.translate(cx, cy + (w - (wounds - 1) / 2) * 40);
+      ctx.rotate(params.avgDir);
+      ctx.strokeStyle = hexToRgba(params.dominantColor, 0.85 - healProgress * 0.4);
+      ctx.lineWidth = 2 + params.strokeCount * 0.2;
+      ctx.beginPath(); ctx.moveTo(-len / 2, -gap / 2); ctx.lineTo(len / 2, -gap / 2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-len / 2, gap / 2); ctx.lineTo(len / 2, gap / 2); ctx.stroke();
+      ctx.restore();
+    }
   }
 
+  // 【漂浮】
+  // 運筆方向的垂直分量→往上畫代表想飄走的意志（升得快），往下畫代表被拉住飄不起來；
+  // 轉彎弧度→飄浮路徑搖不搖晃（猶豫程度）；速度→上升的急促程度；
+  // 筆刷質感→氣泡的邊緣觸感（水彩=朦朧、麥克筆=清楚、其他=一般）；
+  // 筆畫數→氣泡數量；用色→氣泡輪流套用實際用過的顏色
   function theme_float(progress, params) {
-    ctx.fillStyle = '#EAF6FB'; ctx.fillRect(0, 0, GIF_SIZE, GIF_SIZE);
+    ctx.fillStyle = mixColor(params.bgColor, '#EAF6FB', 0.5); ctx.fillRect(0, 0, GIF_SIZE, GIF_SIZE);
     const colors = params.colors;
-    const n = 14;
+    const n = Math.min(20, Math.max(6, params.strokeCount * 3));
+    const riseBias = Math.max(0.3, 1 - Math.sin(params.avgDir) * 0.6);
+    const wobble = params.avgCurv;
+    const brushAlpha = params.dominantBrush === 'watercolor' ? 0.35 : params.dominantBrush === 'marker' ? 0.75 : 0.55;
     for (let i = 0; i < n; i++) {
       const seed = i * 37.1;
-      const y = (1 - ((progress + i / n) % 1)) * GIF_SIZE;
-      const x = (Math.sin(seed) * 0.4 + 0.5) * GIF_SIZE + Math.sin(progress * Math.PI * 2 + seed) * 10;
-      const r = 6 + (i % 4) * 5 + params.avgSpeed * 10;
-      ctx.fillStyle = hexToRgba(colors[i % colors.length], 0.55);
+      const speedFactor = 0.4 + params.avgSpeed * riseBias;
+      const y = (1 - ((progress * speedFactor + i / n) % 1)) * GIF_SIZE;
+      const wobbleX = Math.sin(progress * Math.PI * 4 + seed) * (8 + wobble * 20);
+      const x = (Math.sin(seed) * 0.4 + 0.5) * GIF_SIZE + wobbleX;
+      const r = 5 + (i % 4) * 4 + params.avgSpeed * 8;
+      ctx.fillStyle = hexToRgba(colors[i % colors.length], brushAlpha);
       ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
     }
   }
 
+  // 【退潮】
+  // 運筆方向的水平分量→往右畫代表潮水真的退去（順著主題），往左畫代表退了又捨不得拉回來（矛盾）；
+  // 轉彎弧度→水面波動的劇烈程度；速度→退潮快慢；
+  // 色帶數量→筆畫數；用色→水面色帶輪流套用實際用過的顏色
   function theme_tide(progress, params) {
-    ctx.fillStyle = '#F2EFE6'; ctx.fillRect(0, 0, GIF_SIZE, GIF_SIZE);
+    ctx.fillStyle = mixColor(params.bgColor, '#F2EFE6', 0.5); ctx.fillRect(0, 0, GIF_SIZE, GIF_SIZE);
     const colors = params.colors;
-    const bands = 6;
+    const bands = Math.max(3, Math.min(9, params.strokeCount + 2));
+    const outward = Math.cos(params.avgDir);
+    const recedeSpeed = 0.3 + params.avgSpeed * 0.5;
     for (let i = 0; i < bands; i++) {
-      const y = GIF_SIZE * (i / bands) + Math.sin(progress * Math.PI * 2 + i) * 5;
-      const recede = (progress * GIF_SIZE * 0.6) % GIF_SIZE;
+      const y = GIF_SIZE * (i / bands) + Math.sin(progress * Math.PI * 2 * (1 + params.avgCurv) + i) * (4 + params.avgCurv * 8);
+      let recede = ((progress * recedeSpeed) % 1) * GIF_SIZE;
+      if (outward < 0) recede = GIF_SIZE - recede;
+      const bandWidth = outward >= 0 ? GIF_SIZE - recede : recede;
+      const bandX = outward >= 0 ? 0 : GIF_SIZE - bandWidth;
       ctx.fillStyle = hexToRgba(colors[i % colors.length], 0.35);
-      ctx.fillRect(0, y, GIF_SIZE - recede, GIF_SIZE / bands * 0.8);
+      ctx.fillRect(bandX, y, bandWidth, GIF_SIZE / bands * 0.8);
     }
   }
 
+  // 【裂縫裡的光】
+  // 筆刷質感→光是否閃爍（粉筆/噴槍等顆粒系筆刷＝不穩定的光，其他＝穩定的光）；
+  // 轉彎弧度→裂縫的曲折程度；運筆方向→裂縫延伸的偏移方向；
+  // 速度→光的亮暗變化快慢；筆畫數→裂縫條數（最多3條）；
+  // 麥克筆＝裂縫較粗、較篤定
   function theme_crack(progress, params) {
-    ctx.fillStyle = '#0B0B0D'; ctx.fillRect(0, 0, GIF_SIZE, GIF_SIZE);
-    const glow = 0.4 + 0.35 * Math.sin(progress * Math.PI * 2);
+    ctx.fillStyle = mixColor(params.bgColor, '#0B0B0D', 0.85); ctx.fillRect(0, 0, GIF_SIZE, GIF_SIZE);
+    const flicker = params.dominantBrush === 'chalk' || params.dominantBrush === 'spray';
+    const glowBase = 0.4 + 0.3 * Math.sin(progress * Math.PI * 2 * (flicker ? 3 : 1));
+    const glow = flicker ? glowBase * (0.7 + Math.random() * 0.3) : glowBase;
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
-    ctx.strokeStyle = hexToRgba(params.dominantColor, glow);
-    ctx.lineWidth = 3 + params.avgSpeed * 4;
-    ctx.beginPath();
-    let x = GIF_SIZE * 0.5, y = 0;
-    ctx.moveTo(x, y);
-    for (let i = 1; i <= 8; i++) {
-      x += Math.sin(i * 7 + params.avgDir) * 40;
-      y = GIF_SIZE * (i / 8);
-      ctx.lineTo(x, y);
+    const cracks = Math.max(1, Math.min(3, params.strokeCount));
+    for (let c = 0; c < cracks; c++) {
+      ctx.strokeStyle = hexToRgba(params.dominantColor, glow);
+      ctx.lineWidth = (3 + params.avgSpeed * 4) * (params.dominantBrush === 'marker' ? 1.4 : 1);
+      ctx.beginPath();
+      let x = GIF_SIZE * (0.3 + c * 0.2), y = 0;
+      ctx.moveTo(x, y);
+      const jag = 20 + params.avgCurv * 60;
+      for (let i = 1; i <= 8; i++) {
+        x += Math.sin(i * 7 + params.avgDir + c) * jag;
+        y = GIF_SIZE * (i / 8);
+        ctx.lineTo(x, y);
+      }
+      ctx.stroke();
     }
-    ctx.stroke();
     ctx.restore();
   }
 
+  // 【停在半空中】
+  // 速度→懸浮時的顫抖程度；轉彎弧度→是否搖晃翻轉（猶豫）；
+  // 運筆方向→整體傾斜方向（想往哪裡去卻去不了）；
+  // 筆刷質感→形狀的質地（麥克筆=堅定實心、水彩=朦朧半透明、其他=一般）
   function theme_suspended(progress, params) {
-    ctx.fillStyle = '#EFEFEF'; ctx.fillRect(0, 0, GIF_SIZE, GIF_SIZE);
-    const bob = Math.sin(progress * Math.PI * 2) * 6;
-    ctx.fillStyle = hexToRgba(params.dominantColor, 0.85);
-    ctx.beginPath();
-    ctx.arc(GIF_SIZE * 0.5, GIF_SIZE * 0.5 + bob, 36 + params.avgSpeed * 18, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.fillStyle = mixColor(params.bgColor, '#EFEFEF', 0.6); ctx.fillRect(0, 0, GIF_SIZE, GIF_SIZE);
+    const tremor = params.avgSpeed * 8;
+    const bob = Math.sin(progress * Math.PI * 2) * (4 + tremor);
+    const wobbleRot = params.avgCurv * Math.sin(progress * Math.PI * 2) * 0.3;
+    const leanX = Math.cos(params.avgDir) * 10, leanY = Math.sin(params.avgDir) * 10;
+    ctx.save();
+    ctx.translate(GIF_SIZE * 0.5 + leanX, GIF_SIZE * 0.5 + bob + leanY);
+    ctx.rotate(wobbleRot);
+    const size = 34 + params.avgSpeed * 16;
+    if (params.dominantBrush === 'watercolor') {
+      const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, size * 1.3);
+      grad.addColorStop(0, hexToRgba(params.dominantColor, 0.5));
+      grad.addColorStop(1, hexToRgba(params.dominantColor, 0));
+      ctx.fillStyle = grad;
+      ctx.beginPath(); ctx.arc(0, 0, size * 1.3, 0, Math.PI * 2); ctx.fill();
+    } else {
+      ctx.fillStyle = hexToRgba(params.dominantColor, params.dominantBrush === 'marker' ? 0.92 : 0.75);
+      ctx.beginPath(); ctx.arc(0, 0, size, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
   }
 
   const THEME_RENDERERS = { 0: theme_wound, 3: theme_float, 6: theme_tide, 7: theme_crack, 13: theme_suspended };
