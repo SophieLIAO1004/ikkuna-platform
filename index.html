@@ -348,6 +348,7 @@
 
   function startFreshDrawing() {
     strokes = []; redoStack = [];
+    undoCount = 0; clearCount = 0;
     redrawAll();
     showScreen('screen-draw');
   }
@@ -482,6 +483,7 @@
 
   let strokes = [];
   let redoStack = [];
+  let undoCount = 0, clearCount = 0;
 
   function resizeCanvas() {
     const rect = wrap.getBoundingClientRect();
@@ -526,11 +528,13 @@
     currentSize = Number(e.target.value);
   });
   document.getElementById('clearBtn').addEventListener('click', () => {
+    if (strokes.length > 0) clearCount++;
     strokes = []; redoStack = [];
     redrawAll();
   });
   document.getElementById('undoBtn').addEventListener('click', () => {
     if (strokes.length === 0) return;
+    undoCount++;
     redoStack.push(strokes.pop());
     redrawAll();
   });
@@ -842,39 +846,94 @@
     ctx.restore();
   }
 
-  // 【靠近前的猶豫】v3
-  // 改用「相加疊色」技法（多條半透明光帶疊加，重疊越多越亮），
-  // 顏色的 R/G/B 數值直接是公式參數，不是分類判斷深淺而已：
-  //   R 值→同時嘗試靠近的光絲數量（越紅、越多條、越焦躁）
-  //   G 值→光絲擺動的彎曲幅度（越綠、擺得越不安分）
-  //   B 值→光暈擴散的範圍（越藍、暈得越開）
-  // 轉彎弧度、速度、有沒有用過橡皮擦→仍然決定猶豫的動態節奏
-  function theme_hesitate(progress, params) {
+  // 【靠近前的猶豫】v4——同一主題內分岔成四種結構完全不同的技法
+  // 用過復原或清空→多重嘗試路徑（猶豫著走過好幾條不同的路）
+  // 用過橡皮擦（沒用過復原清空）→逐漸消散的粒子（靠近途中自己瓦解）
+  // 主要用形狀工具而非畫筆（以上皆非時）→幾何物件沿弧線靠近（比較篤定、經過思考的靠近方式）
+  // 以上皆非（純自由畫筆，沒用過復原清空橡皮擦）→疊色光絲（原本那版，RGB數值驅動）
+  function hesitateMultiPath(progress, params) {
+    const cy = GIF_SIZE / 2;
+    const startX = GIF_SIZE * 0.18, targetX = GIF_SIZE * 0.75;
+    const paths = 4;
+    for (let p = 0; p < paths; p++) {
+      const curveOffset = (p - (paths - 1) / 2) * 35;
+      ctx.strokeStyle = hexToRgba(params.dominantColor, 0.12);
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(startX, cy);
+      ctx.quadraticCurveTo((startX + targetX) / 2, cy + curveOffset, targetX, cy);
+      ctx.stroke();
+    }
+    const activePathIdx = Math.floor(progress * paths) % paths;
+    const localT = (progress * paths) % 1;
+    const curveOffset = (activePathIdx - (paths - 1) / 2) * 35;
+    const qx = (startX + targetX) / 2, qy = cy + curveOffset;
+    const x = (1 - localT) * (1 - localT) * startX + 2 * (1 - localT) * localT * qx + localT * localT * targetX;
+    const y = (1 - localT) * (1 - localT) * cy + 2 * (1 - localT) * localT * qy + localT * localT * cy;
+    ctx.fillStyle = hexToRgba(params.dominantColor, 0.85);
+    ctx.beginPath(); ctx.arc(x, y, 6 + params.avgSpeed * 6, 0, Math.PI * 2); ctx.fill();
+  }
+
+  function hesitateDissolve(progress, params) {
+    const cy = GIF_SIZE / 2;
+    const startX = GIF_SIZE * 0.18, targetX = GIF_SIZE * 0.72;
+    const t = 0.2 + 0.5 * progress;
+    const x = startX + (targetX - startX) * t;
+    const n = Math.round(18 * (1 - progress * 0.6));
+    for (let i = 0; i < n; i++) {
+      const ang = (i / n) * Math.PI * 2 + progress * Math.PI * 2;
+      const spread = 10 + progress * 30;
+      const px = x + Math.cos(ang) * spread, py = cy + Math.sin(ang) * spread * 0.6;
+      ctx.fillStyle = hexToRgba(params.dominantColor, 0.5 * (1 - progress * 0.5));
+      ctx.beginPath(); ctx.arc(px, py, 2, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.fillStyle = hexToRgba(params.dominantColor, 0.25);
+    ctx.beginPath(); ctx.arc(targetX, cy, 24, 0, Math.PI * 2); ctx.fill();
+  }
+
+  function hesitateGeometric(progress, params) {
+    const cy = GIF_SIZE / 2;
+    const startX = GIF_SIZE * 0.18, targetX = GIF_SIZE * 0.72;
+    const arcHeight = 40 + params.avgCurv * 40;
+    const t = (Math.sin(progress * Math.PI * 2 - Math.PI / 2) + 1) / 2 * 0.8 + 0.1;
+    const x = startX + (targetX - startX) * t;
+    const y = cy - Math.sin(t * Math.PI) * arcHeight;
+    ctx.fillStyle = hexToRgba(params.dominantColor, 0.28);
+    ctx.beginPath(); ctx.arc(targetX, cy, 22, 0, Math.PI * 2); ctx.fill();
+    ctx.save();
+    ctx.translate(x, y); ctx.rotate(progress * Math.PI * 2 * 0.3);
+    const s = 14 + params.avgSpeed * 8;
+    if (params.dominantTool === 'rect') {
+      ctx.fillStyle = hexToRgba(params.dominantColor, 0.85);
+      ctx.fillRect(-s / 2, -s / 2, s, s);
+    } else if (params.dominantTool === 'line') {
+      ctx.strokeStyle = hexToRgba(params.dominantColor, 0.85);
+      ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.moveTo(-s, 0); ctx.lineTo(s, 0); ctx.stroke();
+    } else {
+      ctx.fillStyle = hexToRgba(params.dominantColor, 0.85);
+      ctx.beginPath(); ctx.arc(0, 0, s / 2, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function hesitateGlowStrands(progress, params) {
     const [r, g, b] = hexToRgbArr(params.dominantColor);
     const rn = r / 255, gn = g / 255, bn = b / 255;
-    const dark = isColorDark(params.bgColor);
-    ctx.fillStyle = dark ? mixColor(params.bgColor, '#08080A', 0.6) : mixColor(params.bgColor, '#FAF8F3', 0.5);
-    ctx.fillRect(0, 0, GIF_SIZE, GIF_SIZE);
-
     const cy = GIF_SIZE / 2;
     const targetX = GIF_SIZE * 0.7, startX = GIF_SIZE * 0.2;
     const hesitationAmp = 0.12 + params.avgCurv * 0.35;
     const hesitationFreq = 1 + params.avgSpeed * 4;
     function approachAt(t) {
-      const base = params.hasEraser ? (Math.sin(t * Math.PI * 2) * 0.5 + 0.5) * 0.5 : 0.2 + t * 0.35;
+      const base = 0.2 + t * 0.35;
       const osc = Math.sin(t * Math.PI * 2 * hesitationFreq) * hesitationAmp;
       return Math.max(0.05, Math.min(0.85, base + osc));
     }
     const t = approachAt(progress);
     const headX = startX + (targetX - startX) * t;
-
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-
-    const strands = 3 + Math.round(rn * 9);   // 紅色分量→光絲數量
-    const curlAmp = 6 + gn * 30;               // 綠色分量→擺動弧度
-    const glowSpread = 14 + bn * 40;           // 藍色分量→光暈擴散範圍
-
+    const strands = 3 + Math.round(rn * 9);
+    const curlAmp = 6 + gn * 30;
+    const glowSpread = 14 + bn * 40;
     for (let s = 0; s < strands; s++) {
       const phase = s * 1.7;
       const sy = cy + Math.sin(phase) * 50;
@@ -886,14 +945,31 @@
       ctx.fillStyle = grad;
       ctx.beginPath(); ctx.arc(sx, sy + curl, glowSpread, 0, Math.PI * 2); ctx.fill();
     }
-
     const targetGrad = ctx.createRadialGradient(targetX, cy, 0, targetX, cy, 30);
     targetGrad.addColorStop(0, hexToRgba(params.dominantColor, 0.4));
     targetGrad.addColorStop(1, hexToRgba(params.dominantColor, 0));
     ctx.fillStyle = targetGrad;
     ctx.beginPath(); ctx.arc(targetX, cy, 30, 0, Math.PI * 2); ctx.fill();
+  }
 
-    ctx.restore();
+  function theme_hesitate(progress, params) {
+    const dark = isColorDark(params.bgColor);
+    ctx.fillStyle = dark ? mixColor(params.bgColor, '#08080A', 0.6) : mixColor(params.bgColor, '#FAF8F3', 0.5);
+    ctx.fillRect(0, 0, GIF_SIZE, GIF_SIZE);
+
+    if (dark) { ctx.save(); ctx.globalCompositeOperation = 'lighter'; }
+
+    if (params.hasUndo || params.hasClear) {
+      hesitateMultiPath(progress, params);       // 猶豫著走過好幾條不同的路
+    } else if (params.hasEraser) {
+      hesitateDissolve(progress, params);         // 靠近途中自己逐漸瓦解
+    } else if (params.dominantTool !== 'pen') {
+      hesitateGeometric(progress, params);        // 用形狀工具＝比較篤定、經過思考的靠近
+    } else {
+      hesitateGlowStrands(progress, params);      // 純自由畫筆＝疊色光絲，RGB數值驅動
+    }
+
+    if (dark) ctx.restore();
   }
 
   // 【擁擠中的安靜】
@@ -995,6 +1071,8 @@
 
     const strokesData = JSON.parse(JSON.stringify(strokes));
     const params = extractDrawingParams(strokesData, canvasBgColor);
+    params.hasUndo = undoCount > 0;
+    params.hasClear = clearCount > 0;
     const scaledStrokes = scaleStrokesForRender(strokesData, GIF_SIZE);
 
     const saveBtn = document.getElementById('saveBtn');
