@@ -565,6 +565,9 @@
     const colorCounts = {}, brushCounts = {}, toolCounts = {};
     let sumDx = 0, sumDy = 0, dirCount = 0;
     let speedSum = 0, curvSum = 0, n = 0;
+    let sizeSum = 0, sizeCount = 0;
+    let sumPX = 0, sumPY = 0, posCount = 0;
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
 
     strokesArr.forEach(s => {
       colorCounts[s.color] = (colorCounts[s.color] || 0) + 1;
@@ -572,24 +575,36 @@
       toolCounts[s.tool] = (toolCounts[s.tool] || 0) + 1;
       const m = s.metrics || {};
       speedSum += (m.avgSpeed || 0.3); curvSum += (m.avgCurvature || 0); n++;
+      sizeSum += (s.size || 6); sizeCount++;
       for (let i = 1; i < s.points.length; i++) {
         sumDx += s.points[i].x - s.points[i - 1].x;
         sumDy += s.points[i].y - s.points[i - 1].y;
         dirCount++;
       }
+      s.points.forEach(p => {
+        sumPX += p.x; sumPY += p.y; posCount++;
+        minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+        minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+      });
     });
 
     const colors = Object.keys(colorCounts);
     const sortedColors = colors.sort((a, b) => colorCounts[b] - colorCounts[a]);
+    // 畫面位置：這批筆畫的重心落在整體範圍的哪裡（0~1），偏左/偏右、偏上/偏下
+    const centroidX = posCount > 0 && maxX > minX ? (sumPX / posCount - minX) / (maxX - minX) : 0.5;
+    const centroidY = posCount > 0 && maxY > minY ? (sumPY / posCount - minY) / (maxY - minY) : 0.5;
 
     return {
       colors: sortedColors.length ? sortedColors : ['#2A2A28'],
       dominantColor: sortedColors[0] || '#2A2A28',
+      colorCount: sortedColors.length,
       dominantBrush: Object.keys(brushCounts).sort((a, b) => brushCounts[b] - brushCounts[a])[0] || 'smooth',
       dominantTool: Object.keys(toolCounts).sort((a, b) => toolCounts[b] - toolCounts[a])[0] || 'pen',
       avgDir: dirCount > 0 ? Math.atan2(sumDy / dirCount, sumDx / dirCount) : 0,
       avgSpeed: n > 0 ? speedSum / n : 0.3,
       avgCurv: n > 0 ? curvSum / n : 0,
+      avgSize: sizeCount > 0 ? sizeSum / sizeCount : 6,
+      centroidX: centroidX, centroidY: centroidY,
       strokeCount: strokesArr.length,
       bgColor: bgColor || '#FFFFFF',
       toolCounts: toolCounts,
@@ -1054,17 +1069,20 @@
     const [r, g, b] = hexToRgbArr(params.dominantColor);
     const rn = r / 255, gn = g / 255, bn = b / 255;
     const dx = Math.abs(Math.cos(params.avgDir));
+    const dy = Math.abs(Math.sin(params.avgDir));
+    const sizeN = Math.min(1, params.avgSize / 30); // 筆刷粗細正規化
+    const isShapeTool = params.dominantTool !== 'pen' && params.dominantTool !== 'eraser';
     return {
-      glow: 0.3 + params.avgCurv * 0.3 + bn * 0.3,
-      packing: 0.2 + (params.dominantBrush === 'chalk' || params.dominantBrush === 'spray' ? 0.4 : 0) + gn * 0.3,
-      flock: 0.2 + dx * 0.3 + params.avgSpeed * 0.3,
-      branch: 0.15 + Math.min(1, params.strokeCount / 10) * 0.5,
-      gridspin: 0.15 + (1 - params.avgCurv) * 0.3 + rn * 0.3,
-      bands: 0.15 + dx * 0.3 + (1 - params.avgSpeed) * 0.2,
-      pathshapes: 0.15 + params.avgSpeed * 0.4 + (params.dominantTool !== 'pen' ? 0.25 : 0),
-      diffraction: 0.15 + (params.hasClear ? 0.3 : 0) + (1 - params.avgSpeed) * 0.2,
-      scribble: 0.15 + params.avgCurv * 0.5,
-      chart: 0.15 + params.avgSpeed * 0.4 + rn * 0.2
+      glow: 0.12 + params.avgCurv * 0.22 + bn * 0.3 + (params.dominantBrush === 'watercolor' ? 0.22 : 0) + params.centroidY * 0.1,
+      packing: 0.1 + (params.dominantBrush === 'chalk' || params.dominantBrush === 'spray' ? 0.4 : 0) + gn * 0.22 + sizeN * 0.18,
+      flock: 0.1 + dx * 0.25 + params.avgSpeed * 0.22 + (params.dominantTool === 'circle' ? 0.2 : 0) + (1 - params.centroidX) * 0.1,
+      branch: 0.08 + Math.min(1, params.strokeCount / 10) * 0.35 + params.avgCurv * 0.18 + (1 - sizeN) * 0.18,
+      gridspin: 0.08 + (1 - params.avgCurv) * 0.22 + rn * 0.22 + (params.dominantTool === 'rect' ? 0.25 : 0) + params.centroidX * 0.1,
+      bands: 0.08 + dy * 0.3 + (1 - params.avgSpeed) * 0.18 + sizeN * 0.2,
+      pathshapes: 0.08 + params.avgSpeed * 0.28 + (isShapeTool ? 0.28 : 0) + (1 - params.centroidY) * 0.12,
+      diffraction: 0.08 + (params.hasClear ? 0.3 : 0) + (1 - params.avgSpeed) * 0.18 + gn * 0.15 + (params.colorCount >= 3 ? 0.12 : 0),
+      scribble: 0.08 + params.avgCurv * 0.32 + (params.hasUndo ? 0.22 : 0) + (1 - sizeN) * 0.14,
+      chart: 0.08 + params.avgSpeed * 0.26 + rn * 0.2 + (params.hasEraser ? 0.2 : 0) + params.centroidX * 0.12
     };
   }
   function pickTechniques(params, n) {
@@ -1088,18 +1106,6 @@
     ctx.globalAlpha = 0.5;
     TECH_FUNCS[picks[2]](progress, params);
     ctx.globalAlpha = 1;
-
-    const cx = GIF_SIZE / 2, cy = GIF_SIZE / 2;
-    const ax = Math.cos(params.avgDir), ay = Math.sin(params.avgDir);
-    const len = GIF_SIZE * 0.5;
-    const start = { x: cx - ax * len / 2, y: cy - ay * len / 2 }, target = { x: cx + ax * len / 2, y: cy + ay * len / 2 };
-    const freq = 1 + params.avgSpeed * 4, amp = 0.1 + params.avgCurv * 0.3;
-    const t = Math.max(0.05, Math.min(0.85, 0.2 + progress * 0.35 + Math.sin(progress * Math.PI * 2 * freq) * amp));
-    const px = start.x + (target.x - start.x) * t, py = start.y + (target.y - start.y) * t;
-    ctx.fillStyle = hexToRgba(params.dominantColor, 0.3);
-    ctx.beginPath(); ctx.arc(target.x, target.y, 16, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = hexToRgba(params.dominantColor, 0.9);
-    ctx.beginPath(); ctx.arc(px, py, 5 + params.avgSpeed * 4, 0, Math.PI * 2); ctx.fill();
 
     if (dark) ctx.restore();
   }
