@@ -231,6 +231,7 @@
       </div>
 
       <div class="row">
+        <button id="backFromDrawBtn">← 返回</button>
         <button id="undoBtn">復原</button>
         <button id="clearBtn">清空</button>
         <button id="saveBtn">保存這件作品</button>
@@ -356,6 +357,12 @@
   document.getElementById('startBtn').addEventListener('click', startFreshDrawing);
   document.getElementById('drawAnotherBtn').addEventListener('click', startFreshDrawing);
   document.getElementById('goGalleryBtn').addEventListener('click', () => showScreen('screen-gallery'));
+  document.getElementById('backFromDrawBtn').addEventListener('click', () => {
+    if (strokes.length > 0 && !confirm('目前畫的內容還沒保存，離開就會消失，確定要返回嗎？')) return;
+    strokes = []; redoStack = []; undoCount = 0; clearCount = 0;
+    redrawAll();
+    showScreen(isReturningUser || loadWorks().length > 0 ? 'screen-gallery' : 'screen-intro');
+  });
   document.getElementById('addWorkBtn').addEventListener('click', startFreshDrawing);
   document.getElementById('myWorksBtn').addEventListener('click', () => showScreen('screen-mywork'));
   document.getElementById('backToGalleryBtn').addEventListener('click', () => showScreen('screen-gallery'));
@@ -1183,6 +1190,14 @@
     }));
   }
 
+  // 逾時保護：不管背後真正卡在哪裡，超過時間就直接判定失敗，避免畫面永遠停在「運算中」
+  function withTimeout(promise, ms) {
+    return Promise.race([
+      promise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('運算逾時（超過 ' + (ms / 1000) + ' 秒）')), ms))
+    ]);
+  }
+
   document.getElementById('saveBtn').addEventListener('click', async () => {
     if (strokes.length === 0) { showScreen('screen-saved'); return; }
     if (!confirm('保存後將無法再修改這件作品，確定要保存嗎？')) return;
@@ -1200,12 +1215,12 @@
 
     let gifDataUrl;
     try {
-      gifDataUrl = await encodeGif(GIF_SIZE, 24, 80, (progress) => {
+      gifDataUrl = await withTimeout(encodeGif(GIF_SIZE, 24, 80, (progress) => {
         renderThemeFrame(currentPrompt.index, progress, params, scaledStrokes);
-      });
+      }), 20000);
     } catch (err) {
       console.error('GIF 運算失敗詳細原因：', err);
-      alert('動態畫面運算失敗，請檢查網路連線後再試一次。若持續失敗，麻煩把瀏覽器主控台（console）印出的錯誤訊息回報給開發者。');
+      alert('動態畫面運算失敗或逾時，請再試一次。若持續失敗，麻煩把瀏覽器主控台（console）印出的錯誤訊息回報給開發者。');
       saveBtn.textContent = originalLabel;
       saveBtn.disabled = false;
       return;
