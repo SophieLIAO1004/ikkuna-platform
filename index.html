@@ -267,6 +267,7 @@
     </div>
     <div class="row" id="exportRow" style="padding:8px 16px 0;display:none;">
       <button id="exportDataBtn" style="font-size:11px;padding:6px 12px;border-radius:999px;border:1px solid #E2DFD6;background:#FAFAF7;color:#8A8778;">匯出資料給 p5.js 使用</button>
+      <button id="clearDataBtn" style="font-size:11px;padding:6px 12px;border-radius:999px;border:1px solid #E2DFD6;background:#FAFAF7;color:#C0392B;">清除本機所有作品資料</button>
     </div>
     <div id="myWorkList" class="gallery-list"></div>
   </div>
@@ -375,6 +376,12 @@
     a.download = 'ikkuna_works_' + Date.now() + '.json';
     a.click();
     URL.revokeObjectURL(url);
+  });
+  document.getElementById('clearDataBtn').addEventListener('click', () => {
+    if (!confirm('確定要清除本機所有作品資料嗎？建議先按左邊「匯出資料」備份，這個動作無法復原。')) return;
+    localStorage.removeItem('ikkuna_works');
+    alert('已清除，儲存空間已釋放。');
+    renderGallery();
   });
 
   function openDetail(work) {
@@ -551,7 +558,7 @@
   // 用實際繪圖產生的數據（顏色、筆刷、形狀/工具、位置、方向、背景色）當參數，
   // 最終輸出一段真正會動的 GIF，縮圖跟點開後看到的都是這支 GIF。
   // ============================================================
-  const GIF_SIZE = 360;
+  const GIF_SIZE = 280;
 
   // ---- 把筆畫資料抽成一組通用參數，給各主題演算法使用 ----
   function extractDrawingParams(strokesArr, bgColor) {
@@ -1170,7 +1177,7 @@
       off.width = size; off.height = size;
       const offCtx = off.getContext('2d');
       const gif = new GIF({
-        workers: 2, quality: 10, width: size, height: size,
+        workers: 2, quality: 16, width: size, height: size,
         workerScript: workerUrl
       });
       const prevCtx = ctx;
@@ -1229,20 +1236,25 @@
     saveBtn.textContent = originalLabel;
     saveBtn.disabled = false;
 
-    const works = loadWorks();
-    works.push({
-      workId: 'work_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
-      anonId: anonId,
-      createdAt: Date.now(),
-      promptIndex: currentPrompt.index,
-      promptText: currentPrompt.text,
-      backgroundColor: canvasBgColor,
-      thumbnail: gifDataUrl,
-      strokesData: strokesData,
-      resonance: 0
-    });
-    saveWorks(works);
-    showScreen('screen-saved');
+    try {
+      const works = loadWorks();
+      works.push({
+        workId: 'work_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+        anonId: anonId,
+        createdAt: Date.now(),
+        promptIndex: currentPrompt.index,
+        promptText: currentPrompt.text,
+        backgroundColor: canvasBgColor,
+        thumbnail: gifDataUrl,
+        strokesData: strokesData,
+        resonance: 0
+      });
+      saveWorks(works);
+      showScreen('screen-saved');
+    } catch (err) {
+      console.error('保存失敗詳細原因：', err);
+      alert('保存失敗，很可能是手機瀏覽器的儲存空間已滿（這段時間測試存了不少作品）。可以到「我的主頁」用清除資料功能釋放空間，或清除這個網站的瀏覽器資料後再試一次。');
+    }
   });
 
   let drawing = false;
