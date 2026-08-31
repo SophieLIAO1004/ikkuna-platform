@@ -16,7 +16,7 @@
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body {
-    margin: 0; padding: 0; overflow: hidden;
+    margin: 0; padding: 0; overflow-x: hidden; overflow-y: auto;
     background: var(--bg); color: var(--text);
     font-family: -apple-system, "PingFang TC", "Noto Sans TC", sans-serif;
     height: 100%;
@@ -851,13 +851,14 @@
   // ============================================================
   function tech_glow(progress, params) {
     const [r, g, b] = hexToRgbArr(params.dominantColor);
-    const n = 3 + Math.round((r / 255) * 8);
-    const curlR = 12 + (g / 255) * 26;
-    const spread = 12 + (b / 255) * 32;
+    const n = 1 + Math.round((r / 255) * 18); // 數量 1~19，範圍拉大
+    const spread = 4 + (b / 255) * 70; // 大小 4~74，範圍拉大
+    const orbitRadius = GIF_SIZE * (0.06 + (g / 255) * 0.44); // 分布範圍 0.06~0.5 倍畫布
+    const orbitSpeed = 0.25 + params.avgSpeed * 3.2; // 移動速度範圍拉大
     for (let i = 0; i < n; i++) {
       const phase = i * 1.7;
-      const x = GIF_SIZE / 2 + Math.cos(phase + progress * Math.PI * 2) * GIF_SIZE * 0.28;
-      const y = GIF_SIZE / 2 + Math.sin(phase * 1.3 + progress * Math.PI * 2 * 1.3) * GIF_SIZE * 0.22;
+      const x = GIF_SIZE / 2 + Math.cos(phase + progress * Math.PI * 2 * orbitSpeed) * orbitRadius;
+      const y = GIF_SIZE / 2 + Math.sin(phase * 1.3 + progress * Math.PI * 2 * orbitSpeed * 1.3) * orbitRadius * 0.85;
       const grad = ctx.createRadialGradient(x, y, 0, x, y, spread);
       grad.addColorStop(0, hexToRgba(params.dominantColor, 0.4));
       grad.addColorStop(1, hexToRgba(params.dominantColor, 0));
@@ -869,47 +870,57 @@
   function tech_packing(progress, params) {
     const cx = GIF_SIZE / 2, cy = GIF_SIZE / 2;
     const gapAngle = params.avgDir + progress * Math.PI * 0.3;
-    const gapSize = 26 + params.avgCurv * 24;
+    const gapSize = 10 + params.avgCurv * 70; // 缺口大小範圍拉大：10~80
+    const count = Math.round(12 + params.strokeCount * 3 + params.avgSpeed * 25); // 圓的數量範圍拉大
+    const sizeMin = 2 + params.avgSpeed * 3, sizeRange = 6 + params.avgCurv * 20; // 圓的大小範圍拉大
     let seed = 17;
     function rnd() { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; }
-    for (let i = 0; i < 38; i++) {
+    for (let i = 0; i < count; i++) {
       const ang = rnd() * Math.PI * 2, dist = Math.sqrt(rnd()) * GIF_SIZE * 0.42;
       const x = cx + Math.cos(ang) * dist, y = cy + Math.sin(ang) * dist;
       let d = Math.abs(((ang - gapAngle + Math.PI) % (Math.PI * 2)) - Math.PI);
       if (d < 0.3 && dist < gapSize + 36) continue;
-      ctx.fillStyle = hexToRgba(params.dominantColor, 0.22 + rnd() * 0.28);
-      ctx.beginPath(); ctx.arc(x, y, 4 + rnd() * 9, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = hexToRgba(params.dominantColor, 0.2 + rnd() * 0.3);
+      ctx.beginPath(); ctx.arc(x, y, sizeMin + rnd() * sizeRange, 0, Math.PI * 2); ctx.fill();
     }
   }
 
   function tech_flock(progress, params) {
     const cx = GIF_SIZE / 2, cy = GIF_SIZE / 2;
-    const baseR = 50 + params.avgCurv * 20;
-    for (let k = 6; k >= 0; k--) {
-      const tp = progress - k * 0.02;
-      const r2 = baseR + Math.sin(tp * Math.PI * 2 * (1 + params.avgSpeed * 3)) * (15 + params.avgCurv * 25);
-      const a = tp * Math.PI * 2 * (1.5 + params.avgSpeed * 2) + params.avgDir;
+    const baseR = GIF_SIZE * (0.06 + params.avgCurv * 0.38); // 軌道半徑範圍拉大：0.06~0.44 倍畫布
+    const wobbleAmp = GIF_SIZE * (0.02 + params.avgCurv * 0.3); // 擺動幅度範圍拉大
+    const angSpeed = 0.4 + params.avgSpeed * 6; // 角速度範圍拉大：0.4~6.4
+    const trailLen = Math.round(4 + params.avgSpeed * 16); // 拖尾長度隨速度變化：4~20
+    const dotSize = 3 + params.avgSpeed * 12; // 主體大小範圍拉大
+    for (let k = trailLen; k >= 0; k--) {
+      const tp = progress - k * 0.015;
+      const r2 = baseR + Math.sin(tp * Math.PI * 2 * (1 + params.avgSpeed * 3)) * wobbleAmp;
+      const a = tp * Math.PI * 2 * angSpeed + params.avgDir;
       const x = cx + Math.cos(a) * r2, y = cy + Math.sin(a) * r2 * 0.7;
-      ctx.fillStyle = hexToRgba(params.dominantColor, k === 0 ? 0.7 : 0.06 * (1 - k / 7));
-      ctx.beginPath(); ctx.arc(x, y, k === 0 ? 6 + params.avgSpeed * 4 : 4, 0, Math.PI * 2); ctx.fill();
+      const alpha = k === 0 ? 0.75 : 0.05 * (1 - k / (trailLen + 1));
+      ctx.fillStyle = hexToRgba(params.dominantColor, alpha);
+      ctx.beginPath(); ctx.arc(x, y, k === 0 ? dotSize : 3, 0, Math.PI * 2); ctx.fill();
     }
   }
 
   function tech_branch(progress, params) {
-    const growT = 0.35 + Math.sin(progress * Math.PI * 2 * (1 + params.avgSpeed * 2)) * 0.2;
-    const branches = Math.min(5, Math.max(2, Math.round(params.strokeCount / 2)));
-    function db(x, y, angle, len, depth) {
-      if (depth <= 0 || len < 4) return;
+    const growT = 0.5 + Math.sin(progress * Math.PI * 2 * (1 + params.avgSpeed * 2)) * (0.15 + params.avgCurv * 0.35);
+    const branches = Math.min(14, Math.max(1, Math.round(1 + params.strokeCount * 1.4))); // 1~14 條，範圍拉大
+    const maxLen = GIF_SIZE * (0.1 + params.avgSpeed * 0.6); // 長度 0.1~0.7 倍畫布，差異拉大
+    const depth = Math.min(7, Math.max(2, Math.round(2 + params.avgCurv * 5))); // 分岔複雜度 2~7 層
+    const spreadAngle = 0.06 + params.avgCurv * 0.75; // 分岔角度範圍拉大，弧度低=幾乎直線，弧度高=劇烈展開
+    function db(x, y, angle, len, d) {
+      if (d <= 0 || len < 3) return;
       const x2 = x + Math.cos(angle) * len, y2 = y + Math.sin(angle) * len;
-      ctx.strokeStyle = hexToRgba(params.dominantColor, 0.18 + depth * 0.09);
-      ctx.lineWidth = depth * 0.8;
+      ctx.strokeStyle = hexToRgba(params.dominantColor, 0.14 + d * 0.08);
+      ctx.lineWidth = Math.max(0.5, d * (0.4 + params.avgSpeed * 0.7));
       ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x2, y2); ctx.stroke();
-      db(x2, y2, angle - 0.4, len * 0.65, depth - 1);
-      db(x2, y2, angle + 0.4, len * 0.65, depth - 1);
+      db(x2, y2, angle - spreadAngle, len * 0.62, d - 1);
+      db(x2, y2, angle + spreadAngle, len * 0.62, d - 1);
     }
     for (let i = 0; i < branches; i++) {
-      const spread = (i - (branches - 1) / 2) * 0.15;
-      db(GIF_SIZE * 0.5, GIF_SIZE * 0.5, params.avgDir + spread, (GIF_SIZE * 0.28) * growT, 4);
+      const spread = (i - (branches - 1) / 2) * (0.05 + params.avgCurv * 0.3);
+      db(GIF_SIZE * 0.5, GIF_SIZE * 0.5, params.avgDir + spread, maxLen * growT, depth);
     }
   }
 
@@ -933,16 +944,19 @@
 
   function tech_bands(progress, params) {
     const colors = params.colors;
-    const bands = Math.max(3, Math.min(8, params.strokeCount + 2));
+    const bands = Math.max(2, Math.min(14, Math.round(2 + params.strokeCount * 1.3))); // 2~14 條，範圍拉大
     const outward = Math.cos(params.avgDir);
+    const fillFactor = 0.2 + params.avgCurv * 0.7; // 帶狀粗細 0.2~0.9 倍，細絲到近乎滿版都有可能
+    const recedeSpeedFactor = 0.12 + params.avgSpeed * 0.85; // 移動速度範圍拉大
+    const waveAmp = params.avgCurv * 22; // 波動幅度：弧度低=近乎死板水平，弧度高=劇烈起伏
     for (let i = 0; i < bands; i++) {
-      const y = GIF_SIZE * (i / bands) + Math.sin(progress * Math.PI * 2 * (1 + params.avgCurv) + i) * 6;
-      let recede = ((progress * (0.3 + params.avgSpeed * 0.5)) % 1) * GIF_SIZE;
+      const y = GIF_SIZE * (i / bands) + Math.sin(progress * Math.PI * 2 * (1 + params.avgCurv * 2) + i) * waveAmp;
+      let recede = ((progress * recedeSpeedFactor) % 1) * GIF_SIZE;
       if (outward < 0) recede = GIF_SIZE - recede;
       const w = outward >= 0 ? GIF_SIZE - recede : recede;
       const x = outward >= 0 ? 0 : GIF_SIZE - w;
-      ctx.fillStyle = hexToRgba(colors[i % colors.length], 0.28);
-      ctx.fillRect(x, y, w, GIF_SIZE / bands * 0.75);
+      ctx.fillStyle = hexToRgba(colors[i % colors.length], 0.2 + params.avgSpeed * 0.18);
+      ctx.fillRect(x, y, w, GIF_SIZE / bands * fillFactor);
     }
   }
 
