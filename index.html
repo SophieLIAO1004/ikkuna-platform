@@ -37,7 +37,8 @@
     padding: 10px 16px; text-align: center; font-size: 13px;
     background: var(--panel); border-bottom: 1px solid var(--border); color: var(--text-secondary);
   }
-  #promptBanner span::before { content: "本週的題目："; color: var(--text-secondary); }
+  #promptStepLabel { font-size: 11px; color: var(--text-secondary); display: block; margin-bottom: 3px; letter-spacing: 0.05em; }
+  #drawPromptText { display: block; color: var(--text); line-height: 1.6; }
   .center-content p { font-size: 14px; color: var(--text-secondary); line-height: 1.7; margin: 0 0 28px; max-width: 320px; }
   .primary-btn {
     font-size: 15px; padding: 13px 32px; border-radius: 999px; border: none;
@@ -173,12 +174,22 @@
       <h1>IKKUNA</h1>
       <p class="prompt-label">本週的題目</p>
       <p class="prompt-text" id="introPromptText">—</p>
+      <p style="font-size:12px;color:var(--text-secondary);margin:-20px 0 28px;">會依序收到三段提問，各自畫下你想像中的畫面</p>
       <button class="primary-btn" id="startBtn">開始</button>
     </div>
   </div>
 
+  <div id="screen-tutorial" class="screen">
+    <div class="center-content">
+      <h1>先熟悉一下畫布</h1>
+      <p>試著換換看筆刷、顏色、工具，隨便畫都可以。<br>這裡畫的東西不會被保存。</p>
+      <button class="primary-btn" id="tutorialStartBtn">開始練習</button>
+      <button class="secondary-btn" id="tutorialSkipBtn">跳過教學</button>
+    </div>
+  </div>
+
   <div id="screen-draw" class="screen">
-    <div id="promptBanner"><span id="drawPromptText"></span></div>
+    <div id="promptBanner"><span id="promptStepLabel"></span><span id="drawPromptText"></span></div>
     <div id="canvasWrap">
       <canvas id="drawCanvas"></canvas>
     </div>
@@ -285,38 +296,88 @@
 <script>
 (function () {
   // ============================================================
-  // 題目庫：意象性、感官性的抽象題目，避免直接詢問心理狀態
-  // 依日期輪替，同一天所有人看到的是同一題
   // ============================================================
-  const PROMPTS = [
-    '尚未癒合的地方',
-    '擁擠中的安靜',
-    '靠近前的猶豫',
-    '漂浮',
-    '還沒說出口的話',
-    '重疊的影子',
-    '退潮',
-    '裂縫裡的光',
-    '沒有名字的顏色',
-    '走遠了才看懂',
-    '安靜的碰撞',
-    '留白的部分',
-    '一半的溫度',
-    '停在半空中'
+  // 主題庫：12 個主題，每個主題底下 3 段提問，依週輪替，
+  // 同一週所有人看到的是同一個主題
+  // ============================================================
+  const WEEKLY_THEMES = [
+    { title: '沒對上的頻率', prompts: [
+      '兩個聲音想合在一起，卻總是差那麼一點點，一個快了半拍，一個慢了半拍，怎麼調都對不上。這在你腦海中是什麼畫面？你會用什麼顏色、什麼樣的筆觸或形狀表現？',
+      '一開始只是一點點對不上的地方，沒有人放在心上，直到「他」越來越有存在感，變成怎麼樣都繞不開的障礙。「他」會是什麼呢？會如何跟周遭互動呢？',
+      '就在某一個瞬間，兩個聲音突然疊在一起了，準確得讓人意外。你會如何去想像這一刻意外的畫面？'
+    ]},
+    { title: '被剪裁過的自己', prompts: [
+      '「他」往外前進著、前進著，中途好像經過了一層看不見的空氣，再被接收時，已經跟原本不太一樣了。「他」是如何行進、變化的呢？',
+      '被放在不屬於它的地方，好不容易脫離了，卻還是留下一點痕跡。你會用什麼顏色、筆觸或形狀，詮釋這個「痕跡」呢？',
+      '有一個部分，一直想從角落露出來，想被真正看見，而不是被這個不屬於他的地方湮沒。他在哪裡呢？又是被什麼埋沒了呢？'
+    ]},
+    { title: '沒有回音的房間', prompts: [
+      '在一個空間裡發出聲響，聲音傳出去，卻沒有任何回音傳回來。這是一個什麼樣的畫面呢？你會用什麼顏色、什麼樣的筆觸或形狀來形容它？',
+      '明明都站在同一個空間裡，中間卻隔著一段看得見、卻怎麼也過不去的障礙。這是一個什麼樣的空間呢？你如何想像這個場景呢？',
+      '沉默的溫度冷得刺骨。你會怎麼詮釋這個極寒的感觸呢？'
+    ]},
+    { title: '說不出口的「不」', prompts: [
+      '他如鯁在喉，卻怎麼樣都沒辦法排除。「他」在你腦海中是什麼呢？',
+      '每一次把「他」壓下去，就又變得更重一點，一次一次加起來，越來越沉。「他」是什麼樣子呢？一次次加起來又是什麼畫面？',
+      '終於有一次，他衝了出來，而那個瞬間，突然覺得輕鬆了些。你會怎麼詮釋這個「輕鬆」的感覺？'
+    ]},
+    { title: '被拉住的重量', prompts: [
+      '被什麼東西輕輕拉著，而沒辦法完全往前走，那個重量如影隨形。是什麼拉著呢？',
+      '那股拉力慢慢長出了「他」——一種說不清楚、卻讓人更難掙脫的感覺。「他」是什麼樣子呢？又是如何纏住的？',
+      '有一個瞬間，真的很想甩開他前進。你會如何想像這個掙脫的畫面？'
+    ]},
+    { title: '沒有門的房間', prompts: [
+      '有一個非密閉空間，從來沒有機會關上。這是一個什麼樣的空間？你會用什麼顏色、筆觸或形狀描繪它？',
+      '有個外來的感覺，不斷落在不屬於它的地方，令人不自在。這個感覺你會怎麼形容、具象化？它從哪裡來、又落在哪裡？',
+      '終於有一次，終於關上了那個空間，關上的那一刻，空間第一次真正屬於自己。你會怎麼想像這個「關上」的畫面？'
+    ]},
+    { title: '接不住的話', prompts: [
+      '有什麼東西不斷向下墜落，似乎要到觸底了，卻還是沒有停下來，繼續往下墜。這是一個什麼樣的畫面？你會用什麼顏色、筆觸或形狀表現它？',
+      '墜落的途中，想像過千百次能夠被接住，每一次想像的姿勢都不太一樣，但那個瞬間始終沒有出現。會是什麼接住了呢？又會出現在哪裡？',
+      '觸底的聲音，比想像中安靜太多，安靜到懷疑是不是真的停止墜落了。你會怎麼詮釋這個「安靜」？'
+    ]},
+    { title: '別人眼中的自己', prompts: [
+      '一個感覺，被重複提起了好多次，每一次提到，感覺都更清晰一點。這是什麼樣的感覺？你會怎麼將他具象化？',
+      '想像著外來的「他」在思緒中繞來繞去，怎麼甩都甩不掉。「他」是什麼人？還是什麼物件？又是怎麼繞來繞去呢？',
+      '如果有一刻真的可以放下一切，完全不需在意了，那會是什麼感覺？你會怎麼想像這個放下的瞬間？'
+    ]},
+    { title: '圈子外的一步', prompts: [
+      '矗立在一個看起來很快樂的空間外面一步的距離，看得到、卻怎麼樣也走不進去。是什麼矗立著呢？這是一個什麼樣的空間？',
+      '繁雜之中尋找一個安心舒適的位置，找了很久，卻怎麼樣都找不到。這個「位置」會是什麼樣子呢？你如何想像尋找的過程？',
+      '有一刻，這個安心的位置出現了，已經不需要再尋找。這個「位置」又是如何出現的呢？'
+    ]},
+    { title: '碎掉的約定', prompts: [
+      '一個原本完整的東西，不知道從什麼時候開始，出現了損傷。這是什麼東西呢？又是如何受損的？',
+      '曾經那麼信仰的真理，直到那一刻，才發現一切都是虛假的。這個「真理」會是什麼樣子？而他又怎麼虛假呢？',
+      '損傷之後，還是有一些東西留了下來，沒有完全毀滅。留下來的會是什麼呢？你會用什麼顏色、筆觸或形狀表現它？'
+    ]},
+    { title: '被搶走的位置', prompts: [
+      '同時渴望著同一個東西，一瞬間，不確定他會被怎麼拿下。這個東西是什麼呢？你會怎麼具象化這個「不確定」的感覺？',
+      '明明是一路付出心血的成果，卻在某一刻，被拿走了。「成果」被拿走時是什麼樣子？又是被誰、怎麼拿走的呢？',
+      '後來，在一片空白中，重新創造了充滿意義的東西，看著它一點一點長大。它會長成什麼樣子呢？又是在什麼樣的地方生長的？'
+    ]},
+    { title: '看不見的繩子', prompts: [
+      '有什麼東西纏繞，一開始很鬆，鬆到幾乎感覺不到，但漸漸地，它收緊了一點。這個東西是什麼？他是如何由鬆變緊了呢？',
+      '動一下，它就又收緊一點，好像有什麼一直在旁邊注意著每一個動作。這道「注意」會是什麼樣子？又是從哪裡來的呢？',
+      '直到某一刻，把它消除——消失的瞬間，比想像中還要輕。你會怎麼繪製這個「輕」的瞬間？'
+    ]}
   ];
+  const STEPS_PER_THEME = 3;
 
-  function getTodayPromptIndex() {
+  function getCurrentThemeIndex() {
     const weekIndex = Math.floor(Date.now() / (1000 * 60 * 60 * 24 * 7));
-    return weekIndex % PROMPTS.length;
+    return weekIndex % WEEKLY_THEMES.length;
   }
-  function getCurrentPrompt() {
-    return { index: getTodayPromptIndex(), text: PROMPTS[getTodayPromptIndex()] };
-  }
-  const currentPrompt = getCurrentPrompt();
-  document.getElementById('introPromptText').textContent = currentPrompt.text;
-  document.getElementById('drawPromptText').textContent = currentPrompt.text;
+  const currentThemeIndex = getCurrentThemeIndex();
+  const currentTheme = WEEKLY_THEMES[currentThemeIndex];
+  document.getElementById('introPromptText').textContent = currentTheme.title;
 
   const isReturningUser = !!localStorage.getItem('ikkuna_anon_id');
+  const tutorialDone = !!localStorage.getItem('ikkuna_tutorial_done');
+  let currentStep = 0;
+  let stepStrokesData = [];
+  let isTutorialMode = false;
+
 
   function getAnonId() {
     let id = localStorage.getItem('ikkuna_anon_id');
@@ -348,14 +409,49 @@
     }
   }
 
+  function updateStepPromptDisplay() {
+    if (isTutorialMode) {
+      document.getElementById('promptStepLabel').textContent = '練習畫布（不會保存）';
+      document.getElementById('drawPromptText').textContent = '試著換換看筆刷、顏色、工具，畫完按右下角完成教學';
+      document.getElementById('saveBtn').textContent = '完成教學';
+      return;
+    }
+    document.getElementById('promptStepLabel').textContent = '第 ' + (currentStep + 1) + ' ／ ' + STEPS_PER_THEME + ' 段';
+    document.getElementById('drawPromptText').textContent = currentTheme.prompts[currentStep];
+    document.getElementById('saveBtn').textContent = (currentStep < STEPS_PER_THEME - 1) ? '下一步' : '保存這件作品';
+  }
+
   function startFreshDrawing() {
+    isTutorialMode = false;
+    currentStep = 0;
+    stepStrokesData = [];
     strokes = []; redoStack = [];
     undoCount = 0; clearCount = 0;
     redrawAll();
     showScreen('screen-draw');
+    updateStepPromptDisplay();
   }
 
-  document.getElementById('startBtn').addEventListener('click', startFreshDrawing);
+  function startTutorial() {
+    isTutorialMode = true;
+    strokes = []; redoStack = [];
+    undoCount = 0; clearCount = 0;
+    redrawAll();
+    showScreen('screen-draw');
+    updateStepPromptDisplay();
+  }
+
+  function finishTutorialAndStart() {
+    localStorage.setItem('ikkuna_tutorial_done', '1');
+    startFreshDrawing();
+  }
+
+  document.getElementById('startBtn').addEventListener('click', () => {
+    if (tutorialDone) startFreshDrawing();
+    else showScreen('screen-tutorial');
+  });
+  document.getElementById('tutorialStartBtn').addEventListener('click', startTutorial);
+  document.getElementById('tutorialSkipBtn').addEventListener('click', finishTutorialAndStart);
   document.getElementById('drawAnotherBtn').addEventListener('click', startFreshDrawing);
   document.getElementById('goGalleryBtn').addEventListener('click', () => showScreen('screen-gallery'));
   document.getElementById('backFromDrawBtn').addEventListener('click', () => {
@@ -386,7 +482,7 @@
 
   function openDetail(work) {
     document.getElementById('detailImage').src = work.thumbnail;
-    document.getElementById('detailPromptText').textContent = work.promptText ? '回應題目：' + work.promptText : '';
+    document.getElementById('detailPromptText').textContent = work.themeTitle ? '本週主題：' + work.themeTitle : '';
     document.getElementById('detailModal').classList.add('active');
   }
   document.getElementById('detailCloseBtn').addEventListener('click', () => {
@@ -1090,6 +1186,29 @@
     return Object.entries(scores).sort((a, b) => b[1] - a[1]).slice(0, n).map(e => e[0]);
   }
 
+  // ============================================================
+  // 三段式作品的合成渲染：三段提問各自獨立畫布、各自的行為數據，
+  // 各自從技法庫選出自己分數最高的技法，三層依序疊加成一支 GIF。
+  // 第三段（收尾）疊在最上面、份量最重，前兩段份量依序遞減。
+  // ============================================================
+  function renderMultiStepFrame(progress, stepParamsArr) {
+    const bg = stepParamsArr[0].bgColor;
+    const dark = isColorDark(bg);
+    ctx.fillStyle = dark ? mixColor(bg, '#08080A', 0.6) : mixColor(bg, '#FAF8F3', 0.5);
+    ctx.fillRect(0, 0, GIF_SIZE, GIF_SIZE);
+    if (dark) { ctx.save(); ctx.globalCompositeOperation = 'lighter'; }
+
+    const alphas = [0.4, 0.62, 0.95];
+    stepParamsArr.forEach((params, i) => {
+      const picks = pickTechniques(params, 1);
+      ctx.globalAlpha = alphas[i] !== undefined ? alphas[i] : 0.5;
+      TECH_FUNCS[picks[0]](progress, params);
+    });
+    ctx.globalAlpha = 1;
+
+    if (dark) ctx.restore();
+  }
+
   // 【靠近前的猶豫】v7——從技法庫取分數最高的前三名疊加，
   // 猶豫靠近的核心敘事（一個點沿方向軸線來回靠近固定目標）疊在技法之上維持題目可讀性
   function theme_hesitate(progress, params) {
@@ -1212,14 +1331,29 @@
   }
 
   document.getElementById('saveBtn').addEventListener('click', async () => {
-    if (strokes.length === 0) { showScreen('screen-saved'); return; }
+    if (isTutorialMode) {
+      finishTutorialAndStart();
+      return;
+    }
+
+    stepStrokesData[currentStep] = JSON.parse(JSON.stringify(strokes));
+
+    if (currentStep < STEPS_PER_THEME - 1) {
+      currentStep++;
+      strokes = []; redoStack = [];
+      redrawAll();
+      updateStepPromptDisplay();
+      return;
+    }
+
     if (!confirm('保存後將無法再修改這件作品，確定要保存嗎？')) return;
 
-    const strokesData = JSON.parse(JSON.stringify(strokes));
-    const params = extractDrawingParams(strokesData, canvasBgColor);
-    params.hasUndo = undoCount > 0;
-    params.hasClear = clearCount > 0;
-    const scaledStrokes = scaleStrokesForRender(strokesData, GIF_SIZE);
+    const stepParamsArr = stepStrokesData.map(sd => {
+      const p = extractDrawingParams(sd, canvasBgColor);
+      p.hasUndo = undoCount > 0;
+      p.hasClear = clearCount > 0;
+      return p;
+    });
 
     const saveBtn = document.getElementById('saveBtn');
     const originalLabel = saveBtn.textContent;
@@ -1229,7 +1363,7 @@
     let gifDataUrl;
     try {
       gifDataUrl = await withTimeout(encodeGif(GIF_SIZE, 24, 80, (progress) => {
-        renderThemeFrame(currentPrompt.index, progress, params, scaledStrokes);
+        renderMultiStepFrame(progress, stepParamsArr);
       }), 20000);
     } catch (err) {
       console.error('GIF 運算失敗詳細原因：', err);
@@ -1248,11 +1382,11 @@
         workId: 'work_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
         anonId: anonId,
         createdAt: Date.now(),
-        promptIndex: currentPrompt.index,
-        promptText: currentPrompt.text,
+        themeIndex: currentThemeIndex,
+        themeTitle: currentTheme.title,
         backgroundColor: canvasBgColor,
         thumbnail: gifDataUrl,
-        strokesData: strokesData,
+        stepStrokesData: stepStrokesData,
         resonance: 0
       });
       saveWorks(works);
